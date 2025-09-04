@@ -1,0 +1,14 @@
+[project]
+name = "audio_to_srt"
+version = "0.1.0"
+description = "Convert audio to SRT subtitles"
+requires-python = ">=3.10"  # 指定 Python 版本为 3.10 或更高
+dependencies = [
+    "openai-whisper>=2023.10.0",
+    "srt>=3.5.3",
+    "requests>=2.31.0"
+]
+
+[tool.uv]
+# 可选：配置 uv 特定设置
+index-url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
