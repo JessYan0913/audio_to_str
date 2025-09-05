@@ -37,7 +37,7 @@ def initialize_service():
     global service
     if service is None:
         try:
-            model_size = os.getenv("WHISPER_MODEL_SIZE", "large-v3")
+            model_size = os.getenv("WHISPER_MODEL_SIZE", "small")
             service = TranscriptionService(model_size=model_size)
             logger.info(f"Transcription service initialized with {model_size} model")
         except Exception as e:

@@ -49,7 +49,7 @@ def main():
         "--language", default=None, help="Language of the audio (default: auto)"
     )
     parser.add_argument(
-        "--model", default="large-v3", help="Whisper model size (default: large-v3)"
+        "--model", default="small", help="Whisper model size (default: small)"
     )
     args = parser.parse_args()
 
