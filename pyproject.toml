@@ -7,7 +7,11 @@ dependencies = [
     "openai-whisper>=2023.10.0",
     "srt>=3.5.3",
     "requests>=2.31.0",
-    "flask>=2.0.0"
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "python-multipart>=0.0.20",
+    "six>=1.17.0",
+    "whisper>=1.1.10"
 ]
 
 [tool.uv]
