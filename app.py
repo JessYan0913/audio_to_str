@@ -315,6 +315,8 @@ async def get_task_status(task_id: str, request: Request):
                             logger.info(
                                 f"Cleaning up SRT file {temp_srt_path} and task {task_id}"
                             )
+                            # 等待一小段时间，确保 FileResponse 完成文件传输
+                            await asyncio.sleep(1)
                             await loop.run_in_executor(None, os.unlink, temp_srt_path)
                             async with tasks_lock:
                                 del tasks[task_id]
@@ -322,7 +324,10 @@ async def get_task_status(task_id: str, request: Request):
                         except Exception as e:
                             logger.warning(f"清理任务 {task_id} 失败: {e}")
 
-                    asyncio.create_task(cleanup())
+                    # 延迟调度 cleanup，确保 FileResponse 有足够时间发送文件
+                    asyncio.get_event_loop().call_later(
+                        2, lambda: asyncio.create_task(cleanup())
+                    )
                     return response
                 else:
                     logger.error(f"SRT file {temp_srt_path} does not exist")
