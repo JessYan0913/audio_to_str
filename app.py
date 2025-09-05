@@ -3,7 +3,10 @@ from transcription_service import TranscriptionService, TranscriptionResult
 import tempfile
 import os
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
+import uuid
+import threading
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -15,8 +18,12 @@ app = Flask(__name__)
 MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB 限制
 ALLOWED_EXTENSIONS = {"mp3", "wav", "m4a", "ogg", "flac"}
 
-# 全局服务实例
+# 全局服务实例和执行器
 service: Optional[TranscriptionService] = None
+executor: Optional[ThreadPoolExecutor] = None
+# 任务存储
+tasks: Dict[str, Dict[str, Any]] = {}
+tasks_lock = threading.Lock()
 
 
 def allowed_file(filename: str) -> bool:

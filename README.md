@@ -48,22 +48,42 @@ python app.py
 #### API 端点
 
 - `GET /health` - 健康检查
-- `POST /transcribe` - 转录音频，返回JSON结果
-- `POST /transcribe/srt` - 转录音频，返回SRT文件
+- `POST /transcribe` - 创建异步转录任务，返回任务ID
+- `GET /tasks/<task_id>` - 查询任务状态
+- `POST /transcribe/srt` - 创建异步SRT转录任务，返回任务ID
+- `GET /tasks/<task_id>/download` - 下载已完成的SRT文件
+- `DELETE /tasks/<task_id>/cleanup` - 清理任务临时文件
 
 #### 示例：使用curl调用API
 
 ```bash
-# 转录音频并获取JSON结果
+# 创建转录任务
 curl -X POST http://localhost:5000/transcribe \
   -F "file=@audio.mp3" \
   -F "language=en" \
   -F "model_size=medium"
 
-# 转录音频并直接下载SRT文件
+# 响应示例
+{
+  "task_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "processing",
+  "message": "转录任务已创建，可通过 /tasks/<task_id> 查询状态"
+}
+
+# 查询任务状态
+curl -X GET http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000
+
+# 创建SRT转录任务
 curl -X POST http://localhost:5000/transcribe/srt \
   -F "file=@audio.mp3" \
+  -F "language=en"
+
+# 下载已完成的SRT文件
+curl -X GET http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/download \
   -o subtitles.srt
+
+# 清理任务
+curl -X DELETE http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/cleanup
 ```
 
 #### JSON响应示例
