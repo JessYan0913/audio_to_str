@@ -6,7 +6,8 @@ requires-python = ">=3.10"  # 指定 Python 版本为 3.10 或更高
 dependencies = [
     "openai-whisper>=2023.10.0",
     "srt>=3.5.3",
-    "requests>=2.31.0"
+    "requests>=2.31.0",
+    "flask>=2.0.0"
 ]
 
 [tool.uv]
