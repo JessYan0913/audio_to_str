@@ -1,4 +1,3 @@
-import torch
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from transcription_service import TranscriptionService, TranscriptionResult
 import tempfile
@@ -10,9 +9,6 @@ import asyncio
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from concurrent.futures import ProcessPoolExecutor
-import whisper
-import srt
-from datetime import timedelta
 from contextlib import asynccontextmanager
 
 # 配置日志
@@ -35,6 +31,8 @@ class TaskResponse(BaseModel):
     status: str
     task_id: Optional[str] = None
     subtitles: Optional[list] = None
+    partial_subtitles: Optional[list] = None
+    progress: Optional[float] = None
     language: Optional[str] = None
     error: Optional[str] = None
 
@@ -44,64 +42,6 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def _run_transcription(
-    audio_path: str, language: Optional[str], model_size: str, is_srt: bool = False
-) -> Dict:
-    """在进程中运行转录任务"""
-    try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = whisper.load_model(model_size, device=device)
-        logger.info(f"Running transcription for {audio_path}, is_srt={is_srt}")
-        if is_srt:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".srt") as tmp_srt:
-                temp_srt_path = tmp_srt.name
-                logger.info(f"Created temporary SRT file: {temp_srt_path}")
-            result = model.transcribe(audio_path, language=language, verbose=True)
-            if not result.get("segments"):
-                logger.error("Transcription failed: no segments found")
-                return {"success": False, "error": "转录失败", "result": None}
-
-            subtitles = []
-            for i, segment in enumerate(result["segments"]):
-                subtitle = srt.Subtitle(
-                    index=i + 1,
-                    start=timedelta(seconds=segment["start"]),
-                    end=timedelta(seconds=segment["end"]),
-                    content=segment["text"].strip(),
-                )
-                subtitles.append(subtitle)
-            with open(temp_srt_path, "w", encoding="utf-8") as f:
-                f.write(srt.compose(subtitles))
-            logger.info(f"SRT file written to {temp_srt_path}")
-            return {
-                "success": True,
-                "result": temp_srt_path,
-                "language": result.get("language", "unknown"),
-            }
-        else:
-            result = model.transcribe(audio_path, language=language, verbose=True)
-            subtitles = [
-                {
-                    "index": i + 1,
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "content": segment["text"].strip(),
-                }
-                for i, segment in enumerate(result["segments"])
-            ]
-            return {
-                "success": True,
-                "result": {
-                    "subtitles": subtitles,
-                    "language": result.get("language", "unknown"),
-                },
-                "language": result.get("language", "unknown"),
-            }
-    except Exception as e:
-        logger.error(f"Transcription failed: {e}")
-        return {"success": False, "error": str(e), "result": None}
-
-
 async def _transcribe_task(
     task_id: str,
     temp_audio_path: str,
@@ -109,37 +49,90 @@ async def _transcribe_task(
     model_size: str,
     is_srt: bool = False,
 ):
-    """异步转录任务"""
+    """异步转录任务 - 确保在后台真正异步执行"""
     try:
         async with tasks_lock:
             tasks[task_id]["status"] = "processing"
+            tasks[task_id]["progress"] = 0.0
+            tasks[task_id]["partial_result"] = []
+            tasks[task_id]["language"] = None
             logger.info(f"Task {task_id} started processing")
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            executor, _run_transcription, temp_audio_path, language, model_size, is_srt
-        )
-        logger.info(f"Transcription result for task {task_id}: {result}")
+        # 定义进度回调函数
+        async def progress_callback(
+            progress: float, subtitles: list, detected_language: str
+        ):
+            async with tasks_lock:
+                if task_id in tasks:  # 防止任务被删除后仍然更新
+                    tasks[task_id]["progress"] = progress
+                    tasks[task_id]["partial_result"] = subtitles.copy()
+                    tasks[task_id]["language"] = detected_language
+                    logger.info(f"Task {task_id} progress: {progress:.2f}%")
 
+        # 关键修复：确保转录操作真正异步执行
+        if is_srt:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".srt") as tmp_srt:
+                temp_srt_path = tmp_srt.name
+
+            # 使用 asyncio.create_task 确保异步执行
+            success = await service.transcribe_to_srt(
+                temp_audio_path, temp_srt_path, language, progress_callback
+            )
+
+            async with tasks_lock:
+                if task_id in tasks:  # 防止任务被删除
+                    if success:
+                        tasks[task_id]["status"] = "completed"
+                        tasks[task_id]["result"] = temp_srt_path
+                        tasks[task_id]["progress"] = 100.0
+                        logger.info(f"Task {task_id} completed successfully")
+                    else:
+                        tasks[task_id]["status"] = "failed"
+                        tasks[task_id]["error"] = "SRT转录失败"
+                        logger.error(f"Task {task_id} failed: SRT转录失败")
+        else:
+            # 使用 asyncio.create_task 确保异步执行
+            result = await service.transcribe(
+                temp_audio_path, language, progress_callback
+            )
+
+            async with tasks_lock:
+                if task_id in tasks:  # 防止任务被删除
+                    if result.success:
+                        tasks[task_id]["status"] = "completed"
+                        tasks[task_id]["result"] = {
+                            "subtitles": result.subtitles,
+                            "language": result.language,
+                        }
+                        tasks[task_id]["progress"] = 100.0
+                        tasks[task_id]["partial_result"] = result.subtitles
+                        tasks[task_id]["language"] = result.language
+                        logger.info(f"Task {task_id} completed successfully")
+                    else:
+                        tasks[task_id]["status"] = "failed"
+                        tasks[task_id]["error"] = result.error
+                        logger.error(f"Task {task_id} failed: {result.error}")
+
+    except asyncio.CancelledError:
+        logger.info(f"Task {task_id} was cancelled")
         async with tasks_lock:
-            if result["success"]:
-                tasks[task_id]["status"] = "completed"
-                tasks[task_id]["result"] = result["result"]
-                tasks[task_id]["language"] = result["language"]
-                logger.info(f"Task {task_id} completed successfully")
-            else:
+            if task_id in tasks:
                 tasks[task_id]["status"] = "failed"
-                tasks[task_id]["error"] = result["error"]
-                logger.error(f"Task {task_id} failed: {result['error']}")
+                tasks[task_id]["error"] = "任务被取消"
     except Exception as e:
         async with tasks_lock:
-            tasks[task_id]["status"] = "failed"
-            tasks[task_id]["error"] = str(e)
-            logger.error(f"Task {task_id} failed with exception: {e}")
+            if task_id in tasks:
+                tasks[task_id]["status"] = "failed"
+                tasks[task_id]["error"] = str(e)
+                logger.error(f"Task {task_id} failed with exception: {e}")
     finally:
+        # 清理临时文件
         try:
-            await loop.run_in_executor(None, os.unlink, temp_audio_path)
-            logger.info(f"Deleted temporary audio file {temp_audio_path}")
+            if os.path.exists(temp_audio_path):
+                await asyncio.get_event_loop().run_in_executor(
+                    None, os.unlink, temp_audio_path
+                )
+                logger.info(f"Deleted temporary audio file {temp_audio_path}")
         except Exception as e:
             logger.warning(f"无法删除临时音频文件 {temp_audio_path}: {e}")
 
@@ -181,15 +174,21 @@ async def transcribe_audio(
         raise HTTPException(status_code=400, detail="不支持的文件格式")
 
     try:
+        # 保存临时文件
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=os.path.splitext(file.filename)[1]
         ) as tmp:
             temp_audio_path = tmp.name
             content = await file.read()
-            with open(temp_audio_path, "wb") as f:
-                f.write(content)
-            logger.info(f"Saved temporary audio file: {temp_audio_path}")
 
+        # 异步写入文件
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, lambda: open(temp_audio_path, "wb").write(content)
+        )
+        logger.info(f"Saved temporary audio file: {temp_audio_path}")
+
+        # 创建任务
         task_id = str(uuid.uuid4())
         async with tasks_lock:
             tasks[task_id] = {
@@ -199,19 +198,26 @@ async def transcribe_audio(
                 "filename": file.filename,
                 "is_srt": False,
                 "language": None,
+                "progress": 0.0,
+                "partial_result": [],
             }
             logger.info(f"Created task {task_id} for file {file.filename}")
 
-        asyncio.create_task(
+        # 关键修复：使用 asyncio.create_task 创建后台任务，不等待
+        task = asyncio.create_task(
             _transcribe_task(
                 task_id, temp_audio_path, language, service.model_size, is_srt=False
             )
         )
+        # 不要 await task，让它在后台运行
+
+        # 立即返回任务ID
         return TaskResponse(status="pending", task_id=task_id)
 
     except Exception as e:
+        # 清理临时文件
         try:
-            if "temp_audio_path" in locals():
+            if "temp_audio_path" in locals() and os.path.exists(temp_audio_path):
                 await asyncio.get_event_loop().run_in_executor(
                     None, os.unlink, temp_audio_path
                 )
@@ -219,7 +225,8 @@ async def transcribe_audio(
                     f"Deleted temporary audio file {temp_audio_path} due to error"
                 )
         except:
-            logger.warning(f"Failed to delete temporary audio file {temp_audio_path}")
+            logger.warning(f"Failed to delete temporary audio file")
+
         logger.error(f"转录请求处理失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -236,15 +243,21 @@ async def transcribe_to_srt(
         raise HTTPException(status_code=400, detail="不支持的文件格式")
 
     try:
+        # 保存临时文件
         with tempfile.NamedTemporaryFile(
             delete=False, suffix=os.path.splitext(file.filename)[1]
         ) as tmp:
             temp_audio_path = tmp.name
             content = await file.read()
-            with open(temp_audio_path, "wb") as f:
-                f.write(content)
-            logger.info(f"Saved temporary audio file: {temp_audio_path}")
 
+        # 异步写入文件
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, lambda: open(temp_audio_path, "wb").write(content)
+        )
+        logger.info(f"Saved temporary audio file: {temp_audio_path}")
+
+        # 创建任务
         task_id = str(uuid.uuid4())
         async with tasks_lock:
             tasks[task_id] = {
@@ -254,19 +267,26 @@ async def transcribe_to_srt(
                 "filename": file.filename,
                 "is_srt": True,
                 "language": None,
+                "progress": 0.0,
+                "partial_result": [],
             }
             logger.info(f"Created task {task_id} for SRT file {file.filename}")
 
-        asyncio.create_task(
+        # 关键修复：使用 asyncio.create_task 创建后台任务，不等待
+        task = asyncio.create_task(
             _transcribe_task(
                 task_id, temp_audio_path, language, service.model_size, is_srt=True
             )
         )
+        # 不要 await task，让它在后台运行
+
+        # 立即返回任务ID
         return TaskResponse(status="pending", task_id=task_id)
 
     except Exception as e:
+        # 清理临时文件
         try:
-            if "temp_audio_path" in locals():
+            if "temp_audio_path" in locals() and os.path.exists(temp_audio_path):
                 await asyncio.get_event_loop().run_in_executor(
                     None, os.unlink, temp_audio_path
                 )
@@ -274,7 +294,8 @@ async def transcribe_to_srt(
                     f"Deleted temporary audio file {temp_audio_path} due to error"
                 )
         except:
-            logger.warning(f"Failed to delete temporary audio file {temp_audio_path}")
+            logger.warning(f"Failed to delete temporary audio file")
+
         logger.error(f"SRT转录请求处理失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -287,14 +308,36 @@ async def get_task_status(task_id: str, request: Request):
             if task_id not in tasks:
                 raise HTTPException(status_code=404, detail="任务不存在")
             task = tasks[task_id].copy()  # 复制任务数据
-        logger.info(f"Task {task_id}: status={task['status']}, is_srt={task['is_srt']}")
+        logger.info(
+            f"Task {task_id}: status={task['status']}, is_srt={task['is_srt']}, progress={task['progress']}"
+        )
 
         status = task["status"]
-        if status in ["pending", "processing"]:
-            return TaskResponse(status=status)
+        if status == "pending":
+            return TaskResponse(
+                status=status,
+                task_id=task_id,
+                progress=task["progress"],
+                partial_subtitles=task["partial_result"],
+            )
+
+        if status == "processing":
+            return TaskResponse(
+                status=status,
+                task_id=task_id,
+                progress=task["progress"],
+                partial_subtitles=task["partial_result"],
+                language=task["language"],
+            )
 
         if status == "failed":
-            return TaskResponse(status=status, error=task["error"])
+            return TaskResponse(
+                status=status,
+                task_id=task_id,
+                error=task["error"],
+                progress=task["progress"],
+                partial_subtitles=task["partial_result"],
+            )
 
         if status == "completed":
             if task["is_srt"]:
@@ -315,8 +358,7 @@ async def get_task_status(task_id: str, request: Request):
                             logger.info(
                                 f"Cleaning up SRT file {temp_srt_path} and task {task_id}"
                             )
-                            # 等待一小段时间，确保 FileResponse 完成文件传输
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(1)  # 确保 FileResponse 完成
                             await loop.run_in_executor(None, os.unlink, temp_srt_path)
                             async with tasks_lock:
                                 del tasks[task_id]
@@ -324,7 +366,6 @@ async def get_task_status(task_id: str, request: Request):
                         except Exception as e:
                             logger.warning(f"清理任务 {task_id} 失败: {e}")
 
-                    # 延迟调度 cleanup，确保 FileResponse 有足够时间发送文件
                     asyncio.get_event_loop().call_later(
                         2, lambda: asyncio.create_task(cleanup())
                     )
@@ -335,8 +376,10 @@ async def get_task_status(task_id: str, request: Request):
             else:
                 result = TaskResponse(
                     status=status,
+                    task_id=task_id,
                     subtitles=task["result"]["subtitles"],
                     language=task["result"]["language"],
+                    progress=100.0,
                 )
                 async with tasks_lock:
                     del tasks[task_id]

@@ -4,14 +4,17 @@ version = "0.1.0"
 description = "Convert audio to SRT subtitles"
 requires-python = ">=3.10"  # 指定 Python 版本为 3.10 或更高
 dependencies = [
-    "openai-whisper>=2023.10.0",
+    "faster-whisper>=1.2.0",
     "srt>=3.5.3",
     "requests>=2.31.0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "python-multipart>=0.0.20",
     "six>=1.17.0",
-    "whisper>=1.1.10"
+    "whisper>=1.1.10",
+    "soundfile>=0.12.1",
+    "pydub>=0.25.1",
+    "torch>=2.8.0"
 ]
 
 [tool.uv]
