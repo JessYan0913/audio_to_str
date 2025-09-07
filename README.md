@@ -210,6 +210,21 @@ services:
 
 4. **监控**: 配置外部监控系统监控容器健康状态
 
+5. **网络问题解决**: 由于网络限制，Docker镜像拉取可能会超时。Dockerfile已配置使用国内镜像源来解决此问题。如果仍然遇到网络问题，可以考虑以下解决方案：
+   ```bash
+   # 配置Docker使用国内镜像加速器
+   echo '{
+     "registry-mirrors": [
+       "https://docker.mirrors.ustc.edu.cn",
+       "https://hub-mirror.c.163.com",
+       "https://registry.docker-cn.com"
+     ]
+   }' | sudo tee /etc/docker/daemon.json
+   
+   # 重启Docker服务
+   sudo systemctl restart docker
+   ```
+
 ## 许可证
 
 MIT
