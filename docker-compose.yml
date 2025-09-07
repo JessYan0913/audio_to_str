@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  audio-to-srt:
+    build: .
+    ports:
+      - "${PORT:-5001}:5001"
+    environment:
+      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-small}
+      - MAX_WORKERS=${MAX_WORKERS:-4}
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
