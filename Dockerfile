@@ -13,15 +13,20 @@ RUN apt-get update && apt-get install -y \
         libsndfile1 \
         ffmpeg \
     && pip install --no-cache-dir uv \
-    && uv pip install --system -e . \
     && rm -rf /var/lib/apt/lists/*
 
+# 复制项目文件
 COPY pyproject.toml uv.lock ./
 COPY . .
 
+# 安装项目依赖
+RUN uv pip install --system -e .
+
+# 创建非特权用户
 RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app
 USER app
 
 EXPOSE $PORT
+
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port $PORT"]
