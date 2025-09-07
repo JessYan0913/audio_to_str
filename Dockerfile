@@ -5,31 +5,33 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     WHISPER_MODEL_SIZE=small \
-    PORT=5001
+    PORT=8000 \
+    HF_HOME=/home/app/.cache/huggingface
 
 # 安装系统依赖和 pip
 RUN apt-get update && apt-get install -y \
         build-essential \
         libsndfile1 \
         ffmpeg \
-    && pip install --no-cache-dir uv \
+        git \
+    && pip install --no-cache-dir uv huggingface_hub \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制项目配置文件
+# 复制项目文件
 COPY pyproject.toml uv.lock ./
-
-# 复制源码到 /app/src
 COPY src ./src
 
-# 安装项目依赖 (editable install)
+# 安装项目依赖
 RUN uv pip install --system -e .
+
+# 下载 faster-whisper 模型（放到 Hugging Face 默认缓存目录）
+RUN huggingface-cli download Systran/faster-whisper-small --local-dir ${HF_HOME}/hub/models--Systran--faster-whisper-small
 
 # 创建非特权用户
 RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app
+    chown -R app:app /app /home/app
 USER app
 
 EXPOSE $PORT
 
-# 启动 uvicorn 服务
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5001"]
+CMD ["sh", "-c", "uvicorn src.app:app --host 0.0.0.0 --port $PORT"]
