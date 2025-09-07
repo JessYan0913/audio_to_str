@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
-from transcription_service import TranscriptionService, TranscriptionResult
+from transcription_service import TranscriptionService
 import tempfile
 import os
 import logging

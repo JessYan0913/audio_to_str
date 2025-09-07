@@ -8,7 +8,6 @@ import logging
 import soundfile as sf
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import functools
 
 logger = logging.getLogger(__name__)
 

@@ -15,11 +15,13 @@ RUN apt-get update && apt-get install -y \
     && pip install --no-cache-dir uv \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制项目文件
+# 复制项目配置文件
 COPY pyproject.toml uv.lock ./
-COPY . .
 
-# 安装项目依赖
+# 复制源码到 /app/src
+COPY src ./src
+
+# 安装项目依赖 (editable install)
 RUN uv pip install --system -e .
 
 # 创建非特权用户
@@ -29,4 +31,5 @@ USER app
 
 EXPOSE $PORT
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port $PORT"]
+# 启动 uvicorn 服务
+CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "5001"]

@@ -15,6 +15,9 @@ dependencies = [
     "torch>=2.8.0"
 ]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.uv]
 # 可选：配置 uv 特定设置
 index-url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
