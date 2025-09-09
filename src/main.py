@@ -1,7 +1,7 @@
 import os
 import requests
 import argparse
-from transcription_service import TranscriptionService, TranscriptionResult
+from transcription_service.core import TranscriptionService
 
 
 # download_audio 函数保持不变，但移到 transcription_service.py 中
