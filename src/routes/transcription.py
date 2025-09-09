@@ -11,7 +11,7 @@ import asyncio
 from ..transcription_service.core import TranscriptionService
 from ..config.shared_state import tasks, tasks_lock
 from ..config import shared_state
-from ..models.task import TaskResponse
+from ..models.task import TaskResponse, SyncTranscriptionResponse
 from ..utils.file_utils import allowed_file
 from ..utils.task_utils import _transcribe_task
 
@@ -262,3 +262,56 @@ async def get_task_status(task_id: str, request: Request):
     except asyncio.TimeoutError:
         logger.error(f"Task {task_id} request timed out")
         raise HTTPException(status_code=504, detail="请求超时")
+
+
+@router.post("/transcribe/sync", response_model=SyncTranscriptionResponse)
+async def transcribe_audio_sync(
+    file: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+):
+    """同步转录接口，用于处理小音频片段"""
+    if not shared_state.service:
+        raise HTTPException(status_code=500, detail="服务未初始化")
+
+    if not allowed_file(file.filename):
+        raise HTTPException(status_code=400, detail="不支持的文件格式")
+
+    temp_audio_path = None
+    try:
+        # 保存临时文件
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=os.path.splitext(file.filename)[1]
+        ) as tmp:
+            temp_audio_path = tmp.name
+            content = await file.read()
+            tmp.write(content)
+
+        logger.info(f"Saved temporary audio file for sync processing: {temp_audio_path}")
+
+        # 直接调用转录服务并等待结果
+        result = await shared_state.service.transcribe(temp_audio_path, language)
+
+        if result.success:
+            return SyncTranscriptionResponse(
+                success=True,
+                subtitles=result.subtitles,
+                language=result.language,
+            )
+        else:
+            return SyncTranscriptionResponse(
+                success=False, error=result.error or "转录失败"
+            )
+
+    except Exception as e:
+        logger.error(f"同步转录请求处理失败: {e}")
+        # 确保即使发生异常也返回标准的响应模型
+        return SyncTranscriptionResponse(success=False, error=str(e))
+
+    finally:
+        # 清理临时文件
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.unlink(temp_audio_path)
+                logger.info(f"Deleted temporary audio file {temp_audio_path}")
+            except Exception as e:
+                logger.warning(f"无法删除临时音频文件 {temp_audio_path}: {e}")
