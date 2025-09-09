@@ -62,7 +62,10 @@ mkdir -p "$HOME/.cache/huggingface"
 # 启动应用
 echo "启动 Audio to SRT Web 服务..."
 echo "服务将在 http://localhost:$PORT 启动"
-echo "按 Ctrl+C 停止服务"
+echo "服务将在后台运行，终端关闭后服务将继续运行"
+echo "日志将输出到 nohup.out 文件"
+echo "要停止服务，请使用 kill 命令或重启系统"
 echo ""
 
-uvicorn src.app:app --host 0.0.0.0 --port $PORT --reload
+nohup uvicorn src.app:app --host 0.0.0.0 --port $PORT --reload &
+echo "服务已启动，进程 ID: $!"
