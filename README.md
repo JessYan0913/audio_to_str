@@ -1,6 +1,6 @@
 # Audio to SRT 转换器
 
-一个将音频文件转换为SRT字幕的工具，支持命令行和API两种调用方式。
+一个基于Python的音频转录服务，提供REST API接口，支持将音频文件转换为SRT字幕格式。采用模块化架构，使用Whisper模型进行语音识别，支持多种音频格式和语言。
 
 ## 功能特性
 
@@ -9,6 +9,8 @@
 - GPU加速（如果可用）
 - 支持命令行和HTTP API调用
 - 大模型支持（支持Whisper的base, small, medium, large等模型）
+- 异步任务处理
+- Docker容器化部署
 
 ## 安装
 
@@ -23,16 +25,16 @@ uv pip install -e .
 
 ```bash
 # 转换本地音频文件
-python main.py --audio path/to/audio.mp3 --output subtitles.srt
+python -m src.main --audio path/to/audio.mp3 --output subtitles.srt
 
 # 转换远程音频文件
-python main.py --audio https://example.com/audio.mp3 --output subtitles.srt
+python -m src.main --audio https://example.com/audio.mp3 --output subtitles.srt
 
 # 指定语言
-python main.py --audio audio.mp3 --output subtitles.srt --language en
+python -m src.main --audio audio.mp3 --output subtitles.srt --language en
 
 # 使用不同大小的模型
-python main.py --audio audio.mp3 --output subtitles.srt --model medium
+python -m src.main --audio audio.mp3 --output subtitles.srt --model medium
 ```
 
 ### 2. API 使用
@@ -40,25 +42,28 @@ python main.py --audio audio.mp3 --output subtitles.srt --model medium
 启动API服务：
 
 ```bash
-python app.py
+# 使用start.sh脚本启动
+./start.sh
+
+# 或直接运行
+python -m src.app
 ```
 
-服务将运行在 `http://localhost:5000`
+服务将运行在 `http://localhost:8000`
 
 #### API 端点
 
 - `GET /health` - 健康检查
 - `POST /transcribe` - 创建异步转录任务，返回任务ID
-- `GET /tasks/<task_id>` - 查询任务状态
 - `POST /transcribe/srt` - 创建异步SRT转录任务，返回任务ID
-- `GET /tasks/<task_id>/download` - 下载已完成的SRT文件
-- `DELETE /tasks/<task_id>/cleanup` - 清理任务临时文件
+- `POST /transcribe/sync` - 同步转录接口，适用于小音频片段
+- `GET /task/{task_id}` - 查询任务状态，完成后自动返回结果或SRT文件
 
 #### 示例：使用curl调用API
 
 ```bash
 # 创建转录任务
-curl -X POST http://localhost:5000/transcribe \
+curl -X POST http://localhost:8000/transcribe \
   -F "file=@audio.mp3" \
   -F "language=en" \
   -F "model_size=medium"
@@ -67,23 +72,21 @@ curl -X POST http://localhost:5000/transcribe \
 {
   "task_id": "123e4567-e89b-12d3-a456-426614174000",
   "status": "processing",
-  "message": "转录任务已创建，可通过 /tasks/<task_id> 查询状态"
+  "message": "转录任务已创建，可通过 /task/<task_id> 查询状态"
 }
 
 # 查询任务状态
-curl -X GET http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000
+curl -X GET http://localhost:8000/task/123e4567-e89b-12d3-a456-426614174000
 
 # 创建SRT转录任务
-curl -X POST http://localhost:5000/transcribe/srt \
+curl -X POST http://localhost:8000/transcribe/srt \
   -F "file=@audio.mp3" \
   -F "language=en"
 
-# 下载已完成的SRT文件
-curl -X GET http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/download \
-  -o subtitles.srt
-
-# 清理任务
-curl -X DELETE http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/cleanup
+# 同步转录（适用于小音频片段）
+curl -X POST http://localhost:8000/transcribe/sync \
+  -F "file=@short_audio.mp3" \
+  -F "language=en"
 ```
 
 #### JSON响应示例
@@ -108,7 +111,7 @@ curl -X DELETE http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/
 
 可以通过环境变量进行配置：
 
-- `PORT`: API服务端口（默认5000）
+- `PORT`: API服务端口（默认8000）
 - `WHISPER_MODEL_SIZE`: 默认模型大小（默认large-v3）
 - `MAX_CONTENT_LENGTH`: 最大上传文件大小（默认100MB）
 
@@ -116,11 +119,28 @@ curl -X DELETE http://localhost:5000/tasks/123e4567-e89b-12d3-a456-426614174000/
 
 ```
 .
-├── main.py            # 命令行入口
-├── app.py             # API服务
-├── transcription_service.py  # 核心转录服务
-├── pyproject.toml     # 项目依赖
-└── README.md          # 项目文档
+├── src/
+│   ├── __init__.py
+│   ├── main.py              # 命令行入口
+│   ├── app.py               # API服务入口
+│   ├── config/
+│   │   ├── app_config.py    # 应用配置
+│   │   └── shared_state.py  # 共享状态管理
+│   ├── models/
+│   │   └── task.py          # 任务模型
+│   ├── routes/
+│   │   └── transcription.py # 转录路由
+│   ├── transcription_service/
+│   │   ├── __init__.py
+│   │   ├── core.py          # 核心转录逻辑
+│   │   ├── exceptions.py    # 异常处理
+│   │   └── ...
+│   └── utils/               # 工具函数
+├── Dockerfile               # Docker镜像配置
+├── docker-compose.yml       # Docker Compose配置
+├── pyproject.toml           # 项目依赖配置
+├── start.sh                 # 启动脚本
+└── README.md                # 项目文档
 ```
 
 ## 依赖

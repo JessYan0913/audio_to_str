@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events"""
     from .config import shared_state
+
     try:
         model_size = os.getenv("WHISPER_MODEL_SIZE", "small")
         shared_state.service = TranscriptionService(model_size=model_size)
@@ -38,5 +39,5 @@ app.include_router(transcription_router)
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", 5001))
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
