@@ -2,6 +2,7 @@ import os
 import requests
 import argparse
 from transcription_service.core import TranscriptionService
+from config import shared_state
 
 
 # download_audio 函数保持不变，但移到 transcription_service.py 中
@@ -24,13 +25,16 @@ def download_audio(url, output_path):
 
 # audio_to_srt 功能已迁移到 TranscriptionService 类
 # 为了保持向后兼容性，提供一个包装函数
-def audio_to_srt(audio_path, output_srt_path, language=None, model_size="base"):
+def audio_to_srt(audio_path, output_srt_path, language=None):
     """将音频转换为 SRT 字幕，支持自动语言检测"""
     try:
-        # 创建服务实例
-        service = TranscriptionService(model_size=model_size)
+        # 使用全局服务实例
+        if not shared_state.service:
+            raise Exception("转录服务未初始化")
         # 执行转录并保存为SRT
-        success = service.transcribe_to_srt(audio_path, output_srt_path, language)
+        success = shared_state.service.transcribe_to_srt(
+            audio_path, output_srt_path, language
+        )
         return success
     except Exception as e:
         print(f"转录或生成字幕失败: {e}")
@@ -53,6 +57,15 @@ def main():
     )
     args = parser.parse_args()
 
+    # 初始化转录服务
+    if not shared_state.service:
+        try:
+            shared_state.service = TranscriptionService(model_size=args.model)
+            print(f"转录服务已初始化，使用 {args.model} 模型")
+        except Exception as e:
+            print(f"转录服务初始化失败: {e}")
+            return
+
     # 处理音频路径
     audio_path = args.audio
     output_srt_path = args.output
@@ -66,7 +79,6 @@ def main():
                 temp_audio_path,
                 output_srt_path,
                 language=args.language,
-                model_size=args.model,
             ):
                 os.remove(temp_audio_path)
                 print(f"临时音频文件 {temp_audio_path} 已删除")
@@ -80,9 +92,7 @@ def main():
         if not os.path.exists(audio_path):
             print(f"错误：音频文件 {audio_path} 不存在")
             return
-        audio_to_srt(
-            audio_path, output_srt_path, language=args.language, model_size=args.model
-        )
+        audio_to_srt(audio_path, output_srt_path, language=args.language)
 
 
 if __name__ == "__main__":

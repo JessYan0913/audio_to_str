@@ -1,14 +1,11 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional
 import tempfile
 import os
 import logging
 import uuid
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
-from contextlib import asynccontextmanager
 
 # 导入全局状态和配置
 from ..transcription_service.core import TranscriptionService
@@ -21,6 +18,7 @@ from ..utils.task_utils import _transcribe_task
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
 
 @router.get("/health")
 async def health_check():
@@ -72,7 +70,11 @@ async def transcribe_audio(
         # 关键修复：使用 asyncio.create_task 创建后台任务，不等待
         task = asyncio.create_task(
             _transcribe_task(
-                task_id, temp_audio_path, language, shared_state.service.model_size, is_srt=False
+                task_id,
+                temp_audio_path,
+                language,
+                shared_state.service.model_size,
+                is_srt=False,
             )
         )
         # 不要 await task，让它在后台运行
@@ -141,7 +143,11 @@ async def transcribe_to_srt(
         # 关键修复：使用 asyncio.create_task 创建后台任务，不等待
         task = asyncio.create_task(
             _transcribe_task(
-                task_id, temp_audio_path, language, shared_state.service.model_size, is_srt=True
+                task_id,
+                temp_audio_path,
+                language,
+                shared_state.service.model_size,
+                is_srt=True,
             )
         )
         # 不要 await task，让它在后台运行
